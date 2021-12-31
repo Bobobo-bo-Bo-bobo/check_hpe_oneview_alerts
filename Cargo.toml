@@ -1,8 +1,15 @@
 [package]
-name = "check_hpe_oneview"
-version = "0.1.0-20211231"
+name = "check_hpe_oneview_alerts"
+version = "0.1.0"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+getopts = "0.2"
+http = "0.2"
+reqwest = { version = "0.11", features = [ "blocking", "native-tls" ]}
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+simple-error = "0.2"
+
