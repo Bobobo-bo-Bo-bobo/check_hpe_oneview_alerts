@@ -10,9 +10,9 @@ pub struct AlertResourceCollection {
     pub count: u64,
     pub total: u64,
     #[serde(rename = "prevPageUri")]
-    pub prevpageuri: String,
+    pub prevpageuri: Option<String>,
     #[serde(rename = "nextPageUri")]
-    pub nextpageuri: String,
+    pub nextpageuri: Option<String>,
     pub members: Vec<AlertSource>,
 }
 
@@ -44,4 +44,10 @@ pub struct EventResource {
     pub processed: bool,
     pub severity: String,
     pub urgency: String,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct SessionData {
+    #[serde(rename = "sessionID")]
+    pub sessionid: Option<String>,
 }

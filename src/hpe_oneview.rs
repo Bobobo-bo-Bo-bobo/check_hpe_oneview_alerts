@@ -14,13 +14,12 @@ pub fn check_alerts(
     ca: &[u8],
     insecure: bool,
 ) -> Result<nagios::NagiosState, Box<dyn Error>> {
-    let client = create_client(ca, insecure)?;
     let mut result = nagios::NagiosState {
         status: nagios::UNKNOWN,
         message: String::new(),
     };
-    let session_token = login(&client, host, user, pass)?;
-    let alerts = get_alerts(&client, host, &session_token)?;
+    let session_token = login(host, user, pass, ca, insecure)?;
+    let alerts = get_alerts(host, &session_token, ca, insecure)?;
     let mut ok_count: u64 = 0;
     let mut warn_count: u64 = 0;
     let mut critical_count: u64 = 0;
@@ -60,24 +59,28 @@ pub fn check_alerts(
     if warn_count > 0 {
         msg_list.push(format!("{} warning alerts found", warn_count));
     }
-    msg_list.push(format!("{} harmless alerts found", ok_count));
+    if ok_count > 0 {
+        msg_list.push(format!("{} harmless alerts found", ok_count));
+    }
 
     result.message = msg_list.join(", ");
 
     // We don't give a shit if the logout fails
     #[allow(unused_must_use)]
     {
-        logout(&client, host, &session_token);
+        logout(host, &session_token, ca, insecure);
     }
     Ok(result)
 }
 
 fn login(
-    client: &reqwest::blocking::Client,
     host: &str,
     user: &str,
     pass: &str,
+    ca: &[u8],
+    insecure: bool,
 ) -> Result<String, Box<dyn Error>> {
+    let client = create_client("", ca, insecure)?;
     let payload = json!({
         "userName": user,
         "password": pass,
@@ -89,50 +92,38 @@ fn login(
         .body(payload)
         .send()?;
 
-    // Note: For invalid logins, HPE OneView returns **200 OK** but sets not sessionID
-    let result_headers = request.headers();
-    let token = match result_headers.get("sessionID") {
-        Some(v) => v.to_str()?.to_string(),
+    let reply = request.text()?;
+    let session: json::SessionData = serde_json::from_str(&reply)?;
+    let token = match session.sessionid {
+        Some(v) => v,
         None => bail!("Login to HPE OneView failed"),
     };
 
     Ok(token)
 }
 
-fn logout(
-    client: &reqwest::blocking::Client,
-    host: &str,
-    token: &str,
-) -> Result<(), Box<dyn Error>> {
-    let session = json!({
-        "Auth": token,
-    })
-    .to_string();
+fn logout(host: &str, token: &str, ca: &[u8], insecure: bool) -> Result<(), Box<dyn Error>> {
+    let client = create_client(token, ca, insecure)?;
 
     client
         .delete(format!("https://{}/rest/login-sessions", host))
-        .body(session)
         .send()?;
 
     Ok(())
 }
 
 fn get_alerts(
-    client: &reqwest::blocking::Client,
     host: &str,
     token: &str,
+    ca: &[u8],
+    insecure: bool,
 ) -> Result<json::AlertResourceCollection, Box<dyn Error>> {
-    let session = json!({
-        "Auth": token,
-    })
-    .to_string();
-
+    let client = create_client(token, ca, insecure)?;
     let request = client
         .get(format!(
-            "https://{}/rest/alerts?filter=%%22alertState<>%%27Cleared%%27%%22",
+            "https://{}/rest/alerts?filter=%22alertState<>%27Cleared%27%22&count=-1",
             host
         ))
-        .body(session)
         .send()?;
 
     if request.status() != StatusCode::OK {
@@ -149,6 +140,7 @@ fn get_alerts(
 }
 
 fn create_client(
+    token: &str,
     ca_cert: &[u8],
     insecure_ssl: bool,
 ) -> Result<reqwest::blocking::Client, Box<dyn Error>> {
@@ -172,6 +164,10 @@ fn create_client(
         "X-Api-Version",
         header::HeaderValue::from_str(constants::HPE_ONEVIEW_API_VERSION).unwrap(),
     );
+
+    if !token.is_empty() {
+        head.insert("Auth", header::HeaderValue::from_str(token).unwrap());
+    }
 
     if insecure_ssl {
         cli = cli.danger_accept_invalid_certs(true);
